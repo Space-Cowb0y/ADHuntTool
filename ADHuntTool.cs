@@ -39,6 +39,8 @@ namespace ADHuntTool
         }
 
         public static bool showACL = false;
+        public static bool bToFile = false;
+        public static string filename = "";
 
         [DllImport("kernel32.dll")]
         public static extern uint GetLastError();
@@ -253,14 +255,16 @@ namespace ADHuntTool
             Int32 size = r.Count;
             for (Int32 i = 0; i < size; i++)
             {
-                if(r[i].GetType().ToString() == "System.Byte[]") {
+                if (r[i].GetType().ToString() == "System.Byte[]")
+                {
                     sb.Append(Encoding.ASCII.GetString((byte[])r[i]) + ",");
-                } else
+                }
+                else
                 {
                     sb.Append(r[i] + ",");
                 }
 
-                
+
             }
             return sb.ToString().TrimEnd(',');
         }
@@ -271,6 +275,20 @@ namespace ADHuntTool
             if (p.GetType().ToString() == "System.Int64")
             {
                 return DateTime.FromFileTime((long)p).ToString();
+            }
+
+            if (p.GetType().ToString() == "System.Byte[]")
+            {
+                try
+                {
+                    SecurityIdentifier si = new SecurityIdentifier((byte[])p, 0);
+                    string output = si.ToString();
+                    return output;
+                }
+                catch
+                {
+                    return Encoding.ASCII.GetString((byte[])p);
+                }
             }
             return p.ToString(); ;
         }
@@ -343,9 +361,9 @@ namespace ADHuntTool
             {
                 RawSecurityDescriptor raw = new RawSecurityDescriptor((byte[])r[i], 0);
 
-               
+
                 sb.Append(SDDLParser.Parse(raw.GetSddlForm(AccessControlSections.All)) + ",");
-                
+
 
             }
             return sb.ToString().TrimEnd(',');
@@ -364,7 +382,7 @@ namespace ADHuntTool
             ds.Filter = query;
             ds.PageSize = Int32.MaxValue;
 
-            if(Program.showACL)
+            if (Program.showACL)
             {
                 ds.SecurityMasks = SecurityMasks.Dacl | SecurityMasks.Group;
             }
@@ -374,7 +392,7 @@ namespace ADHuntTool
                 try
                 {
                     StringBuilder sb = new StringBuilder();
-                    if(Program.showACL)
+                    if (Program.showACL)
                     {
                         sb.Append("ntSecurityDescriptor" + new string(' ', 24 - "ntSecurityDescriptor".Length) + ": ");
                         sb.Append(FormatSDDL(r.Properties["ntSecurityDescriptor"]));
@@ -490,13 +508,23 @@ namespace ADHuntTool
             return managedFound;
         }
 
-
         static void Main(string[] args)
         {
             bool verboseDebug = Array.Exists(args, match => match.ToLower() == "-verbose");
+            bToFile = Array.Exists(args, match => match.ToLower() == "-tofile");
             Program.showACL = Array.Exists(args, match => match.ToLower() == "-acl");
-
+            StringWriter sw = new StringWriter();
+            TextWriter tw = Console.Out;
             ThreadPool.SetMaxThreads(max_threadpool, max_threadpool);
+
+            if (bToFile)
+            {
+                filename = Directory.GetCurrentDirectory() + "\\" + DateTimeOffset.Now.ToUnixTimeSeconds().ToString() + ".txt";
+                Console.WriteLine("Output will be saved to {0}", filename);
+                sw = new StringWriter();
+                Console.SetOut(sw);
+            }
+
 
             // ShowWindow(GetConsoleWindow(), 0);
             if (args.Length >= 2)
@@ -555,7 +583,7 @@ namespace ADHuntTool
                 else if (option == "dumpallusers")
                 {
                     string query = "";
-                    string properties = "name,givenname,displayname,samaccountname,adspath,distinguishedname,memberof,ou,mail,proxyaddresses,lastlogon,pwdlastset,mobile,streetaddress,co,title,department,description,comment,badpwdcount,objectcategory,userpassword,scriptpath,managedby,managedobjects";
+                    string properties = "name,givenname,displayname,samaccountname,objectsid,adspath,distinguishedname,memberof,ou,mail,proxyaddresses,lastlogon,pwdlastset,mobile,streetaddress,co,title,department,description,comment,badpwdcount,objectcategory,userpassword,scriptpath,managedby,managedobjects";
                     try
                     {
                         query = "(&(objectClass=user))";
@@ -794,7 +822,7 @@ namespace ADHuntTool
                 else if (option == "dumpuser")
                 {
                     string query = "";
-                    string properties = "name,givenname,displayname,samaccountname,adspath,distinguishedname,memberof,ou,mail,proxyaddresses,lastlogon,pwdlastset,mobile,streetaddress,co,title,department,description,comment,badpwdcount,objectcategory,userpassword,scriptpath,managedby,managedobjects";
+                    string properties = "name,givenname,displayname,samaccountname,objectsid,adspath,distinguishedname,memberof,ou,mail,proxyaddresses,lastlogon,pwdlastset,mobile,streetaddress,co,title,department,description,comment,badpwdcount,objectcategory,userpassword,scriptpath,managedby,managedobjects";
                     try
                     {
                         query = "(&(objectClass=user)(samaccountname=*" + args[2] + "*))";
@@ -803,6 +831,21 @@ namespace ADHuntTool
                     catch (Exception e)
                     {
                         Console.WriteLine("ERROR: DumpUser required a user argument");
+                        ShowDebug(e, verboseDebug);
+                    }
+                }
+                else if (option == "dumpsamaccount")
+                {
+                    string query = "";
+                    string properties = "samaccountname";
+                    try
+                    {
+                        query = "(&(objectClass=user))";
+                        LdapQuery(domain, query, properties);
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine("ERROR: DumpSamAccount catched an unexpected exception");
                         ShowDebug(e, verboseDebug);
                     }
                 }
@@ -839,7 +882,7 @@ namespace ADHuntTool
                 else if (option == "dumpallcomputers")
                 {
                     string query = "";
-                    string properties = "name,displayname,operatingsystem,description,adspath,objectcategory,serviceprincipalname,distinguishedname,cn,lastlogon,managedby,managedobjects";
+                    string properties = "name,displayname,operatingsystem,description,objectsid,adspath,objectcategory,serviceprincipalname,distinguishedname,cn,lastlogon,managedby,managedobjects";
                     try
                     {
                         query = "(&(objectClass=computer))";
@@ -854,7 +897,7 @@ namespace ADHuntTool
                 else if (option == "dumpcomputer")
                 {
                     string query = "";
-                    string properties = "name,displayname,operatingsystem,description,adspath,objectcategory,serviceprincipalname,distinguishedname,cn,lastlogon,managedby,managedobjects";
+                    string properties = "name,displayname,operatingsystem,description,adspath,objectsid,objectcategory,serviceprincipalname,distinguishedname,cn,lastlogon,managedby,managedobjects";
                     try
                     {
                         query = "(&(objectClass=computer)(name=*" + args[2] + "))";
@@ -869,7 +912,7 @@ namespace ADHuntTool
                 else if (option == "dumpallgroups")
                 {
                     string query = "";
-                    string properties = "name,adspath,distinguishedname,member,memberof";
+                    string properties = "name,adspath,distinguishedname,objectsid,member,memberof";
                     try
                     {
                         query = "(&(objectClass=group))";
@@ -884,7 +927,7 @@ namespace ADHuntTool
                 else if (option == "dumpgroup")
                 {
                     string query = "";
-                    string properties = "name,adspath,distinguishedname,member,memberof";
+                    string properties = "name,adspath,distinguishedname,objectsid,member,memberof";
                     try
                     {
                         query = "(&(objectClass=group)(name=*" + args[2] + "))";
@@ -990,7 +1033,7 @@ namespace ADHuntTool
                 {
                     // Based on https://www.trustedsec.com/blog/targeted-active-directory-host-enumeration/
                     string query = "";
-                    string properties = "name,givenname,displayname,samaccountname,adspath,distinguishedname,memberof,ou,mail,proxyaddresses,lastlogon,pwdlastset,mobile,streetaddress,co,title,department,description,comment,badpwdcount,objectcategory,userpassword,scriptpath";
+                    string properties = "name,givenname,displayname,samaccountname,adspath,objectsid,distinguishedname,memberof,ou,mail,proxyaddresses,lastlogon,pwdlastset,mobile,streetaddress,co,title,department,description,comment,badpwdcount,objectcategory,userpassword,scriptpath";
                     var date = DateTime.Today.AddDays(-(DateTime.Today.Day + 90));
                     long dateUtc = date.ToFileTimeUtc();
                     try
@@ -1121,7 +1164,16 @@ namespace ADHuntTool
                     Console.WriteLine("Usage: {0} options domain [arguments]", System.Reflection.Assembly.GetExecutingAssembly().Location);
                 }
             }
+            if (bToFile)
+            {
+                StringBuilder sb = new StringBuilder();
+                sb.Append(sw.ToString());
+                File.WriteAllText(filename, sb.ToString());
+                Console.SetOut(tw);
+            }
+            Console.WriteLine("Process completed");
         }
+
     }
 
     // Thanks stackoverflow for this parser.
